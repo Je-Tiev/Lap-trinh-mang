@@ -60,7 +60,7 @@ int main() {
     printf("Capitalized message: %s\n", buffer);
 
 	// Send the capitalized string back to the client
-	send(new_socket, buffer, strlen(buffer), 0) < 0)
+	send(new_socket, buffer, strlen(buffer), 0);
 	printf("Capitalized message sent to client\n");
 
     // Close the sockets
