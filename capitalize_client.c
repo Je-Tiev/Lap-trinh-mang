@@ -23,7 +23,7 @@ int main() {
     serv_addr.sin_port = htons(PORT);
 
     // Convert IP addresses from text to binary
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, "192.168.2.114", &serv_addr.sin_addr) <= 0) {
         perror("Invalid address or address not supported");
         return -1;
     }
@@ -40,7 +40,7 @@ int main() {
     message[strcspn(message, "\n")] = 0;
 
     // Send the message to the server
-    send(sock, message, strlen(message), 0)
+    send(sock, message, strlen(message), 0);
     printf("Message sent to server: %s\n", message);
 
     // Read server's response
