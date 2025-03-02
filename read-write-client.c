@@ -14,6 +14,7 @@ int main() {
     struct sockaddr_in servaddr;
     char sendline[MAXLINE], recvline[MAXLINE];
     ssize_t n;
+    char server_ip_str[INET_ADDRSTRLEN]; 
 
     // Create a socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -27,8 +28,15 @@ int main() {
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(PORT);
 
+    printf("Enter server IP address: ");
+    if (fgets(server_ip_str, INET_ADDRSTRLEN, stdin) == NULL) {
+        perror("fgets for server IP failed");
+        exit(EXIT_FAILURE);
+    }
+    server_ip_str[strcspn(server_ip_str, "\n")] = 0;
+
     // Convert IPv4 address from text to binary form and set it
-    if (inet_pton(AF_INET, "127.0.0.1", &servaddr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, server_ip_str, &servaddr.sin_addr) <= 0) {
         perror("Invalid address or address not supported");
         exit(EXIT_FAILURE);
     }
