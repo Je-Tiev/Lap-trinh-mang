@@ -13,10 +13,12 @@ ssize_t readline(int fd, void *vptr, size_t maxlen);
 
 int main() {
     int listenfd, connfd;
-    struct sockaddr_in servaddr;
+    struct sockaddr_in servaddr, cliaddr;
+    socklen_t clilen = sizeof(cliaddr);
     char buffer[MAXLINE];
     ssize_t n;
-
+    char client_ip_str[INET_ADDRSTRLEN];
+    
     // Create a listening socket
     listenfd = socket(AF_INET, SOCK_STREAM, 0);
     if (listenfd < 0) {
@@ -45,11 +47,18 @@ int main() {
     printf("Server listening on port %d...\n", PORT);
 
     // Accept incoming connection
-    connfd = accept(listenfd, (struct sockaddr *)NULL, NULL);
+    connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &clilen);
     if (connfd < 0) {
         perror("Accept failed");
         exit(EXIT_FAILURE);
     }
+
+    if (inet_ntop(AF_INET, &cliaddr.sin_addr, client_ip_str, INET_ADDRSTRLEN) == NULL) {
+        perror("inet_ntop failed");
+        strcpy(client_ip_str, "UNKNOWN");
+    }
+
+    printf("Connection from client IP: %s, Port: %d\n", client_ip_str, ntohs(cliaddr.sin_port));
 
     // Read the message from the client using readline
     while ((n = readline(connfd, buffer, MAXLINE)) > 0) {
