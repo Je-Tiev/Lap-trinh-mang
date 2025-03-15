@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <errno.h>
 
 #define PORT 8080
 #define MAX_CLIENTS 10
