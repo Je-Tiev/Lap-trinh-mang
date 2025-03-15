@@ -9,6 +9,7 @@
 #define MAX_CLIENTS 10
 #define BUFFER_SIZE 1024
 
+// broadcast function
 void broadcast_message(int sender_fd, struct pollfd *pfds, int num_clients, char *message) {
     for (int i = 1; i <= num_clients; i++) {
         if (pfds[i].fd > 0 && pfds[i].fd != sender_fd) {
