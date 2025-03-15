@@ -105,11 +105,12 @@ int main() {
                     }
                 } else {
                     buffer[bytes_read] = '\0';
-                    char message[BUFFER_SIZE + 50];
-                    snprintf(message, sizeof(message), "%s: %s", clients[i].username, buffer);
                     for (int j = 0; j < MAX_CLIENTS; j++) {
-                        if (clients[j].socket != 0 && j != i)
-                            send(clients[j].socket, message, strlen(message), 0);
+                        if (clients[j].socket != 0 && j != i) {
+                            send(clients[j].socket, clients[i].username, strlen(clients[i].username), 0);
+                            send(clients[j].socket, ": ", 2, 0);
+                            send(clients[j].socket, buffer, strlen(buffer), 0);
+                        }
                     }
                 }
             }
