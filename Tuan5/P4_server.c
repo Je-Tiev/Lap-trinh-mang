@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <errno.h>
 
 #define PORT 8080
 #define MAX_CLIENTS 10
@@ -14,15 +15,7 @@ typedef struct {
     char username[50];
 } Client;
 
-Client clients[MAX_CLIENTS];
-
-void broadcast_message(int sender_fd, char *message) {
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i].socket != 0 && clients[i].socket != sender_fd) {
-            send(clients[i].socket, message, strlen(message), 0);
-        }
-    }
-}
+Client clients[MAX_CLIENTS] = {0};
 
 int main() {
     int server_fd, client_fd;
@@ -31,14 +24,26 @@ int main() {
     char buffer[BUFFER_SIZE];
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        perror("Socket failed");
+        exit(EXIT_FAILURE);
+    }
+
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    bind(server_fd, (struct sockaddr *)&address, sizeof(address));
-    listen(server_fd, 3);
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
 
-    printf("Server đang chạy trên cổng %d...\n", PORT);
+    if (listen(server_fd, 3) < 0) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server đang lắng nghe trên cổng %d...\n", PORT);
 
     while (1) {
         FD_ZERO(&readfds);
@@ -47,14 +52,15 @@ int main() {
 
         for (int i = 0; i < MAX_CLIENTS; i++) {
             int sd = clients[i].socket;
-            if (sd > 0) FD_SET(sd, &readfds);
-            if (sd > max_sd) max_sd = sd;
+            if (sd > 0)
+                FD_SET(sd, &readfds);
+            if (sd > max_sd)
+                max_sd = sd;
         }
 
         int activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
-        if (activity < 0) {
+        if ((activity < 0) && (errno != EINTR)) {
             perror("Select error");
-            exit(EXIT_FAILURE);
         }
 
         if (FD_ISSET(server_fd, &readfds)) {
@@ -66,20 +72,22 @@ int main() {
             }
 
             char username[50];
-            recv(client_fd, username, sizeof(username), 0);
+            recv(client_fd, username, 50, 0);
             username[strcspn(username, "\n")] = 0;
 
             for (int i = 0; i < MAX_CLIENTS; i++) {
                 if (clients[i].socket == 0) {
                     clients[i].socket = client_fd;
-                    strcpy(clients[i].username, username);
+                    strncpy(clients[i].username, username, 50);
+                    printf("%s đã tham gia phòng chat.\n", username);
+                    snprintf(buffer, BUFFER_SIZE, "%s đã tham gia phòng chat.\n", username);
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].socket != 0)
+                            send(clients[j].socket, buffer, strlen(buffer), 0);
+                    }
                     break;
                 }
             }
-
-            printf("%s đã tham gia phòng chat.\n", username);
-            sprintf(buffer, "%s đã tham gia phòng chat.\n", username);
-            broadcast_message(client_fd, buffer);
         }
 
         for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -87,20 +95,25 @@ int main() {
             if (FD_ISSET(sd, &readfds)) {
                 int bytes_read = read(sd, buffer, BUFFER_SIZE);
                 if (bytes_read == 0) {
-                    printf("%s đã rời khỏi phòng chat.\n", clients[i].username);
-                    sprintf(buffer, "%s đã rời khỏi phòng chat.\n", clients[i].username);
-                    broadcast_message(sd, buffer);
+                    printf("%s đã rời phòng chat.\n", clients[i].username);
+                    snprintf(buffer, BUFFER_SIZE, "%s đã rời phòng chat.\n", clients[i].username);
                     close(sd);
                     clients[i].socket = 0;
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].socket != 0)
+                            send(clients[j].socket, buffer, strlen(buffer), 0);
+                    }
                 } else {
                     buffer[bytes_read] = '\0';
-                    char msg[BUFFER_SIZE + 50];
-                    snprintf(msg, sizeof(msg), "%s: %s", clients[i].username, buffer);
-                    broadcast_message(sd, msg);
+                    char message[BUFFER_SIZE + 50];
+                    snprintf(message, sizeof(message), "%s: %s", clients[i].username, buffer);
+                    for (int j = 0; j < MAX_CLIENTS; j++) {
+                        if (clients[j].socket != 0 && j != i)
+                            send(clients[j].socket, message, strlen(message), 0);
+                    }
                 }
             }
         }
     }
-
     return 0;
 }
