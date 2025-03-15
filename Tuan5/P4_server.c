@@ -95,7 +95,7 @@ int main() {
                 } else {
                     buffer[bytes_read] = '\0';
                     char msg[BUFFER_SIZE + 50];
-                    sprintf(msg, "%s: %s", clients[i].username, buffer);
+                    snprintf(msg, sizeof(msg), "%s: %s", clients[i].username, buffer);
                     broadcast_message(sd, msg);
                 }
             }
