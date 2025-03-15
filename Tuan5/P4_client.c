@@ -15,11 +15,19 @@ int main() {
     fd_set readfds;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = inet_addr("192.168.2.118");
 
-    connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Connection failed");
+        exit(EXIT_FAILURE);
+    }
 
     printf("Nhập tên của bạn: ");
     fgets(username, sizeof(username), stdin);
@@ -51,6 +59,10 @@ int main() {
 
         if (FD_ISSET(STDIN_FILENO, &readfds)) {
             fgets(buffer, BUFFER_SIZE, stdin);
+            if (strncmp(buffer, "/exit", 5) == 0) {
+                printf("Bạn đã thoát khỏi phòng chat.\n");
+                break;
+            }
             send(sock, buffer, strlen(buffer), 0);
         }
     }
