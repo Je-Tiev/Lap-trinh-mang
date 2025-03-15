@@ -3,27 +3,41 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/select.h>
 #include <signal.h>
+#include <errno.h>
+#include <sys/select.h>
 
 #define PORT 8080
 #define MAX_CLIENTS 10
 #define BUFFER_SIZE 1024
 
+int server_fd;
+int client_sockets[MAX_CLIENTS] = {0};
 volatile sig_atomic_t stop_server = 0;
 
-void signal_handler(int sig) {
-    printf("\nNhận tín hiệu SIGINT, đóng server...\n");
+void signal_handler(int signo) {
     stop_server = 1;
 }
 
+void broadcast_message(int sender_fd, int *client_sockets, int num_clients, char *message) {
+    for (int i = 0; i < num_clients; i++) {
+        int client_fd = client_sockets[i];
+        if (client_fd != sender_fd && client_fd > 0) {
+            send(client_fd, message, strlen(message), 0);
+        }
+    }
+}
+
 int main() {
-    int server_fd, client_fd, client_sockets[MAX_CLIENTS] = {0};
     struct sockaddr_in address;
     fd_set readfds;
     char buffer[BUFFER_SIZE];
+    struct sigaction sa;
 
-    signal(SIGINT, signal_handler);
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
 
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
@@ -45,7 +59,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    printf("Server đang chạy trên cổng %d...\n", PORT);
+    printf("Server đang lắng nghe trên cổng %d...\n", PORT);
 
     while (!stop_server) {
         FD_ZERO(&readfds);
@@ -58,16 +72,60 @@ int main() {
             if (sd > max_sd) max_sd = sd;
         }
 
-        int activity = pselect(max_sd + 1, &readfds, NULL, NULL, NULL, NULL);
-        if (activity < 0 && stop_server == 0) {
+        struct timespec timeout = {5, 0};
+        sigset_t empty_mask;
+        sigemptyset(&empty_mask);
+
+        int activity = pselect(max_sd + 1, &readfds, NULL, NULL, &timeout, &empty_mask);
+        if (activity < 0 && errno != EINTR) {
             perror("pselect error");
-            exit(EXIT_FAILURE);
+            break;
         }
 
-        if (stop_server) break;
+        if (FD_ISSET(server_fd, &readfds)) {
+            socklen_t addrlen = sizeof(address);
+            int client_fd = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+            if (client_fd < 0) {
+                perror("Accept failed");
+                continue;
+            }
+
+            printf("Client mới kết nối: %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                if (client_sockets[i] == 0) {
+                    client_sockets[i] = client_fd;
+                    printf("Thêm client vào danh sách ở vị trí %d\n", i);
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            int sd = client_sockets[i];
+            if (FD_ISSET(sd, &readfds)) {
+                int bytes_read = read(sd, buffer, BUFFER_SIZE);
+                if (bytes_read == 0) {
+                    printf("Client %d đã ngắt kết nối\n", i);
+                    close(sd);
+                    client_sockets[i] = 0;
+                } else {
+                    buffer[bytes_read] = '\0';
+                    printf("Tin nhắn từ client %d: %s", i, buffer);
+                    broadcast_message(sd, client_sockets, MAX_CLIENTS, buffer);
+                }
+            }
+        }
     }
 
-    printf("Đóng tất cả kết nối...\n");
+    printf("Đang đóng server...\n");
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (client_sockets[i] > 0) {
+            close(client_sockets[i]);
+        }
+    }
     close(server_fd);
+
+    printf("Server đã dừng.\n");
     return 0;
 }
