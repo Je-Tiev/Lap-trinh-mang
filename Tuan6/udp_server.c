@@ -8,8 +8,8 @@
 
 #define PORT 8080
 #define MAXLINE 1024
-#define XOR_KEY 'K' // Khóa XOR
-#define TIMEOUT_SEC 5 // Thời gian chờ timeout (giây)
+#define XOR_KEY 'K'
+#define TIMEOUT_SEC 5
 #define NUM_MESSAGES 3
 
 void xor_cipher(char *data, char key) {
