@@ -15,7 +15,7 @@ int main() {
     char *message = "Hello from client";
     struct sockaddr_in servaddr, recv_servaddr;
     socklen_t len = sizeof(recv_servaddr);
-    char server_ip[] = "127.0.0.1";
+    char server_ip[] = "192.168.2.118";
 
     // Tạo socket UDP
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
