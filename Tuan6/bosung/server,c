@@ -1,0 +1,242 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <time.h>
+
+#define MAX_CLIENTS 10
+#define BUFFER_SIZE 1024
+#define XOR_KEY 0x42
+
+typedef struct
+{
+    struct sockaddr_in addr;
+    socklen_t addr_len;
+    char username[50];
+    int active;
+    time_t last_active;
+} ClientInfo;
+
+void xor_cipher(char *data, char key)
+{
+    for (int i = 0; data[i] != '\0'; i++)
+    {
+        data[i] ^= key;
+    }
+}
+
+int find_client(ClientInfo *clients, struct sockaddr_in addr, int max)
+{
+    for (int i = 0; i < max; i++)
+    {
+        if (clients[i].active)
+        {
+            if (clients[i].addr.sin_addr.s_addr == addr.sin_addr.s_addr &&
+                clients[i].addr.sin_port == addr.sin_port)
+            {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+int find_empty_slot(ClientInfo *clients, int max)
+{
+    for (int i = 0; i < max; i++)
+    {
+        if (!clients[i].active)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void send_encrypted_message(int sockfd, char *message, struct sockaddr_in addr, socklen_t addr_len)
+{
+    char buffer[BUFFER_SIZE];
+    strcpy(buffer, message);
+    xor_cipher(buffer, XOR_KEY);
+    sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addr_len);
+}
+
+void broadcast_message(int sockfd, ClientInfo *clients, int sender_index, char *message, int max_clients)
+{
+    char broadcast_msg[BUFFER_SIZE];
+
+    if (sender_index >= 0)
+    {
+        snprintf(broadcast_msg, BUFFER_SIZE, "[%s]: %s", clients[sender_index].username, message);
+    }
+    else
+    {
+        snprintf(broadcast_msg, BUFFER_SIZE, "[Server]: %s", message);
+    }
+
+    for (int i = 0; i < max_clients; i++)
+    {
+        if (clients[i].active && i != sender_index)
+        {
+            send_encrypted_message(sockfd, broadcast_msg, clients[i].addr, clients[i].addr_len);
+        }
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 3)
+    {
+        printf("Sử dụng: %s <địa_chỉ_IP> <cổng>\n", argv[0]);
+        return 1;
+    }
+
+    const char *server_ip = argv[1];
+    int server_port = atoi(argv[2]);
+
+    int server_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_socket < 0)
+    {
+        perror("Không thể tạo socket");
+        return 1;
+    }
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+    server_addr.sin_port = htons(server_port);
+
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        perror("Bind thất bại");
+        close(server_socket);
+        return 1;
+    }
+
+    printf("Server đang chạy trên %s:%d\n", server_ip, server_port);
+
+    ClientInfo clients[MAX_CLIENTS];
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        clients[i].active = 0;
+    }
+
+    fd_set read_fds;
+    struct timeval timeout;
+
+    char buffer[BUFFER_SIZE];
+    char decrypted_buffer[BUFFER_SIZE];
+
+    while (1)
+    {
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+
+        FD_ZERO(&read_fds);
+        FD_SET(server_socket, &read_fds);
+
+        int activity = select(server_socket + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (activity < 0)
+        {
+            perror("Select thất bại");
+            break;
+        }
+
+        time_t current_time = time(NULL);
+        for (int i = 0; i < MAX_CLIENTS; i++)
+        {
+            if (clients[i].active && (current_time - clients[i].last_active > 60))
+            {
+                printf("Client %s đã timeout và bị xóa\n", clients[i].username);
+                clients[i].active = 0;
+
+                char timeout_msg[100];
+                sprintf(timeout_msg, "%s đã ngắt kết nối (timeout)", clients[i].username);
+                broadcast_message(server_socket, clients, -1, timeout_msg, MAX_CLIENTS);
+            }
+        }
+
+        if (FD_ISSET(server_socket, &read_fds))
+        {
+            struct sockaddr_in client_addr;
+            socklen_t client_addr_len = sizeof(client_addr);
+
+            int bytes_received = recvfrom(server_socket, buffer, BUFFER_SIZE, 0,
+                                          (struct sockaddr *)&client_addr, &client_addr_len);
+
+            if (bytes_received > 0)
+            {
+                buffer[bytes_received] = '\0';
+
+                strcpy(decrypted_buffer, buffer);
+                xor_cipher(decrypted_buffer, XOR_KEY);
+
+                int client_index = find_client(clients, client_addr, MAX_CLIENTS);
+
+                if (client_index == -1)
+                {
+                    if (strncmp(decrypted_buffer, "REGISTER:", 9) == 0)
+                    {
+                        int new_index = find_empty_slot(clients, MAX_CLIENTS);
+
+                        if (new_index != -1)
+                        {
+                            clients[new_index].addr = client_addr;
+                            clients[new_index].addr_len = client_addr_len;
+                            clients[new_index].active = 1;
+                            clients[new_index].last_active = time(NULL);
+                            strncpy(clients[new_index].username, decrypted_buffer + 9,
+                                    sizeof(clients[new_index].username) - 1);
+
+                            printf("Client mới đăng ký: %s\n", clients[new_index].username);
+
+                            char welcome_msg[100];
+                            sprintf(welcome_msg, "Xin chào %s! Bạn đã tham gia vào chat.",
+                                    clients[new_index].username);
+                            send_encrypted_message(server_socket, welcome_msg,
+                                                   client_addr, client_addr_len);
+
+                            char join_msg[100];
+                            sprintf(join_msg, "%s đã tham gia chat", clients[new_index].username);
+                            broadcast_message(server_socket, clients, new_index, join_msg, MAX_CLIENTS);
+                        }
+                        else
+                        {
+                            send_encrypted_message(server_socket, "SERVER_FULL",
+                                                   client_addr, client_addr_len);
+                        }
+                    }
+                }
+                else
+                {
+                    clients[client_index].last_active = time(NULL);
+
+                    if (strcmp(decrypted_buffer, "EXIT") == 0)
+                    {
+                        printf("Client %s đã ngắt kết nối\n", clients[client_index].username);
+                        clients[client_index].active = 0;
+
+                        char exit_msg[100];
+                        sprintf(exit_msg, "%s đã rời khỏi chat", clients[client_index].username);
+                        broadcast_message(server_socket, clients, -1, exit_msg, MAX_CLIENTS);
+                    }
+                    else
+                    {
+                        printf("Tin nhắn từ %s: %s\n", clients[client_index].username, decrypted_buffer);
+                        broadcast_message(server_socket, clients, client_index, decrypted_buffer, MAX_CLIENTS);
+
+                        send_encrypted_message(server_socket, "ACK", client_addr, client_addr_len);
+                    }
+                }
+            }
+        }
+    }
+
+    close(server_socket);
+    return 0;
+}
